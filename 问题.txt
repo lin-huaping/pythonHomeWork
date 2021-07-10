@@ -1,0 +1,136 @@
+麻烦的是每次都要将云盘的那些图片拷贝到当地运行文件夹，下次再进行百度为什么复制时间这么长，怎么到文件夹中进行解压快一点
+首先是git，然后是colab怎么把文件上传上去，需要保存在云盘，可是如果保存在云盘，又会发现运行速率超级无极低，，然后又要放在当地文件夹才可以，所以要进行拷贝
+import tensorflow as tf
+import pandas as pd
+import numpy as np
+import sys
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+from tensorflow import keras
+
+print(tf.__version__)
+print(sys.version_info)
+for module in mpl, np, pd, keras:
+    print(module.__name__, module.__version__)
+
+train_dir = '/content/train_local/input/training/training'
+validation_dir = '/content/train_local/input/validation/validation'
+
+# 定义一些静态变量，比如图片的尺寸，分批训练的数量等
+height = 300
+width = 400
+channels = 3
+batch_size = 64
+num_classes = 10
+
+train_datagen = keras.preprocessing.image.ImageDataGenerator(
+    rescale=1. / 255,
+    rotation_range=40,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+train_generator = train_datagen.flow_from_directory(
+    train_dir, target_size=(height, width),
+    batch_size=batch_size, seed=7,
+    shuffle=True, class_mode='categorical'
+)
+
+valid_datagen = keras.preprocessing.image.ImageDataGenerator(
+    rescale=1./255
+)
+valid_generator = valid_datagen.flow_from_directory(
+    validation_dir, target_size=(height, width),
+    batch_size=batch_size, seed=7,
+    shuffle=False, class_mode='categorical'
+)
+
+train_num = train_generator.samples
+valid_num = valid_generator.samples
+print(train_num, valid_num)
+
+for i in range(2):
+    x, y = train_generator.next()
+    print(x.shape, y.shape)
+    #print(y)
+
+# 构建模型
+model = keras.models.Sequential([
+    keras.layers.Conv2D(filters=32, kernel_size=3, padding='same',
+                        activation='relu',
+                        input_shape=[width, height, channels]),
+    keras.layers.Conv2D(filters=32, kernel_size=3, padding='same',
+                        activation='relu'),
+    keras.layers.MaxPool2D(pool_size=2),
+    keras.layers.Conv2D(filters=64, kernel_size=3, padding='same',
+                        activation='relu'),
+    keras.layers.Conv2D(filters=64, kernel_size=3, padding='same',
+                        activation='relu'),
+    keras.layers.MaxPool2D(pool_size=2),
+    keras.layers.Conv2D(filters=128, kernel_size=3, padding='same',
+                        activation='relu'),
+    keras.layers.Conv2D(filters=128, kernel_size=3, padding='same',
+                        activation='relu'),
+    keras.layers.MaxPool2D(pool_size=2),
+    keras.layers.Flatten(),
+    keras.layers.Dense(128, activation='relu'),
+    keras.layers.Dense(num_classes, activation='softmax')
+])
+
+model.compile(loss='categorical_crossentropy',
+              optimizer=tf.optimizers.Adam(0.0005), metrics=['accuracy'])
+model.summary()
+
+# 训练
+epochs = 100
+history = model.fit_generator(
+    train_generator, steps_per_epoch= train_num // batch_size,
+    epochs=epochs, validation_data=valid_generator,
+    validation_steps= valid_num // batch_size
+)
+
+def plot_learning_curves(history, label, epochs, min_value, max_value):
+    data = {}
+    data[label] = history.history[label]
+    data['val_' + label] = history.history['val_' + label]
+    pd.DataFrame(data).plot(figsize=(8,5))
+    plt.grid(True)
+    plt.axis([0, epochs, min_value, max_value])
+    plt.show()
+#print(history.history.keys())
+plot_learning_curves(history, 'accuracy', epochs, 0, 1)
+plot_learning_curves(history, 'loss', epochs, 0, 5)
+model.save('/content/drive/MyDrive/tf/input/model.h5')
+print('完毕')
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+!mkdir train_local
+%cp -av /content/drive/MyDrive/tf/input   /content/train_local
+!pip install pyunpack
+!pip install patool
+from pyunpack import Archive
+Archive('/content/train_local/JPEGImages.rar').extractall('/content/train_local')
+
+
+log_dir="/content/drive/MyDrive/tf/logs"
+if not os.path.exists(log_dir):
+  os.mkdir(log_dir)# 创建保存目录
+tensorboard_callback = keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1,
+                    profile_batch = 100000000)
+
+LOG_DIR = '/content/drive/MyDrive/tf/logs'
+get_ipython().system_raw('tensorboard --logdir {} --host 0.0.0.0 --port 6006 &'.format(LOG_DIR))
+#开启ngrok service，绑定port 6006(tensorboard)
+get_ipython().system_raw('./ngrok http 6006 &')
+! curl -s http://localhost:4040/api/tunnels | python3 -c "import sys, json; print(json.load(sys.stdin)['tunnels'][0]['public_url'])"
+!tensorboard --logdir=/content/drive/MyDrive/tf/logs/train
+
+
+
